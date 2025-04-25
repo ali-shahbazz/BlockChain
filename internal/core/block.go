@@ -145,6 +145,41 @@ func (b *Block) SetHash() {
 	b.Hash = hash[:]
 }
 
+// CalculateHash recalculates the hash of the block without changing the block's stored hash
+func (b *Block) CalculateHash() []byte {
+	var encoded bytes.Buffer
+	enc := gob.NewEncoder(&encoded)
+
+	// Encode block headers including new fields
+	err := enc.Encode(struct {
+		Timestamp       int64
+		PrevBlockHash   []byte
+		MerkleRoot      []byte
+		Height          int64
+		Nonce           int64
+		StateRoot       []byte
+		AccumulatorRoot []byte
+		ShardID         string
+	}{
+
+		Timestamp:       b.Timestamp,
+		PrevBlockHash:   b.PrevBlockHash,
+		MerkleRoot:      b.MerkleRoot,
+		Height:          b.Height,
+		Nonce:           b.Nonce,
+		StateRoot:       b.StateRoot,
+		AccumulatorRoot: b.AccumulatorRoot,
+		ShardID:         b.ShardID,
+	})
+
+	if err != nil {
+		log.Panicf("Failed to encode block header: %v", err)
+	}
+
+	hash := sha256.Sum256(encoded.Bytes())
+	return hash[:]
+}
+
 // SignBlock signs the block with the given private key
 func (b *Block) SignBlock(privateKey []byte) error {
 	// In a real implementation, this would use proper digital signatures

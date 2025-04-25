@@ -3,6 +3,7 @@ package crypto
 import (
 	"bytes"
 	"crypto/sha256"
+	"sync"
 )
 
 // MerkleNode represents a node in a Merkle tree
@@ -14,155 +15,285 @@ type MerkleNode struct {
 
 // MerkleTree represents a Merkle tree
 type MerkleTree struct {
-	RootNode *MerkleNode
-}
-
-// NewMerkleNode creates a new Merkle tree node
-func NewMerkleNode(left, right *MerkleNode, data []byte) *MerkleNode {
-	node := MerkleNode{}
-
-	if left == nil && right == nil {
-		// Leaf node, hash the data
-		hash := sha256.Sum256(data)
-		node.Data = hash[:]
-	} else {
-		// Internal node, combine left and right children hashes
-		prevHashes := append(left.Data, right.Data...)
-		hash := sha256.Sum256(prevHashes)
-		node.Data = hash[:]
-	}
-
-	node.Left = left
-	node.Right = right
-
-	return &node
+	RootNode  *MerkleNode
+	leafNodes []*MerkleNode
+	hashCache map[string][]byte
+	cacheMux  sync.RWMutex
 }
 
 // NewMerkleTree creates a new Merkle tree from a sequence of data
 func NewMerkleTree(data [][]byte) *MerkleTree {
 	var nodes []*MerkleNode
+	var wg sync.WaitGroup
+	nodesChan := make(chan *MerkleNode, len(data))
 
-	// Create leaf nodes
+	// Create leaf nodes in parallel for better performance with large datasets
 	for _, datum := range data {
-		node := NewMerkleNode(nil, nil, datum)
+		wg.Add(1)
+		go func(datum []byte) {
+			defer wg.Done()
+			nodesChan <- &MerkleNode{
+				Left:  nil,
+				Right: nil,
+				Data:  calculateHash(datum),
+			}
+		}(datum)
+	}
+
+	// Close channel after all goroutines complete
+	go func() {
+		wg.Wait()
+		close(nodesChan)
+	}()
+
+	// Collect nodes from channel
+	for node := range nodesChan {
 		nodes = append(nodes, node)
 	}
 
-	// Handle odd number of nodes by duplicating the last one
-	if len(nodes)%2 != 0 {
-		nodes = append(nodes, nodes[len(nodes)-1])
+	// If there are no nodes, return a tree with a nil root
+	if len(nodes) == 0 {
+		return &MerkleTree{
+			RootNode:  nil,
+			leafNodes: []*MerkleNode{},
+			hashCache: make(map[string][]byte),
+		}
 	}
 
-	// Build tree bottom-up
+	// Use parallel processing for building tree levels when there are many nodes
+	if len(nodes) > 1000 {
+		return buildTreeInParallel(nodes)
+	} else {
+		return buildTreeSequentially(nodes)
+	}
+}
+
+// buildTreeSequentially builds a Merkle tree sequentially (for smaller trees)
+func buildTreeSequentially(nodes []*MerkleNode) *MerkleTree {
+	// Store leaf nodes for verification
+	leafNodes := make([]*MerkleNode, len(nodes))
+	copy(leafNodes, nodes)
+
+	// Build the tree level by level from the bottom up
 	for len(nodes) > 1 {
-		var level []*MerkleNode
+		var newLevel []*MerkleNode
 
+		// Handle odd number of nodes by duplicating the last one
+		if len(nodes)%2 != 0 {
+			nodes = append(nodes, nodes[len(nodes)-1])
+		}
+
+		// Create parent nodes for each pair
 		for i := 0; i < len(nodes); i += 2 {
-			node := NewMerkleNode(nodes[i], nodes[i+1], nil)
-			level = append(level, node)
+			node := &MerkleNode{
+				Left:  nodes[i],
+				Right: nodes[i+1],
+				Data:  calculateHash(append(nodes[i].Data, nodes[i+1].Data...)),
+			}
+			newLevel = append(newLevel, node)
 		}
 
-		// Ensure even number of nodes at each level
-		if len(level)%2 != 0 && len(level) > 1 {
-			level = append(level, level[len(level)-1])
-		}
-
-		nodes = level
+		nodes = newLevel
 	}
 
-	return &MerkleTree{RootNode: nodes[0]}
+	// The root is the only node left
+	return &MerkleTree{
+		RootNode:  nodes[0],
+		leafNodes: leafNodes,
+		hashCache: make(map[string][]byte),
+	}
+}
+
+// buildTreeInParallel builds a Merkle tree using parallel processing (for larger trees)
+func buildTreeInParallel(nodes []*MerkleNode) *MerkleTree {
+	// Store leaf nodes for verification
+	leafNodes := make([]*MerkleNode, len(nodes))
+	copy(leafNodes, nodes)
+
+	// Build the tree level by level from the bottom up
+	for len(nodes) > 1 {
+		// Handle odd number of nodes by duplicating the last one
+		if len(nodes)%2 != 0 {
+			nodes = append(nodes, nodes[len(nodes)-1])
+		}
+
+		var wg sync.WaitGroup
+		newLevel := make([]*MerkleNode, len(nodes)/2)
+
+		// Create parent nodes for each pair in parallel
+		for i := 0; i < len(nodes); i += 2 {
+			wg.Add(1)
+			go func(i int, idx int) {
+				defer wg.Done()
+				newLevel[idx] = &MerkleNode{
+					Left:  nodes[i],
+					Right: nodes[i+1],
+					Data:  calculateHash(append(nodes[i].Data, nodes[i+1].Data...)),
+				}
+			}(i, i/2)
+		}
+
+		wg.Wait()
+		nodes = newLevel
+	}
+
+	// The root is the only node left
+	return &MerkleTree{
+		RootNode:  nodes[0],
+		leafNodes: leafNodes,
+		hashCache: make(map[string][]byte),
+	}
 }
 
 // GetRootHash returns the root hash of the Merkle tree
 func (m *MerkleTree) GetRootHash() []byte {
+	if m.RootNode == nil {
+		return nil
+	}
 	return m.RootNode.Data
 }
 
-// VerifyData verifies if some data is in the tree
+// VerifyData checks if data is in the Merkle tree
 func (m *MerkleTree) VerifyData(data []byte) bool {
-	hash := sha256.Sum256(data)
-	return m.verifyHash(hash[:], m.RootNode)
-}
+	dataHash := calculateHash(data)
 
-// verifyHash is a helper function to verify a hash in the tree
-func (m *MerkleTree) verifyHash(hash []byte, node *MerkleNode) bool {
-	if node == nil {
-		return false
+	// Use cached result if available
+	cacheKey := string(dataHash)
+	m.cacheMux.RLock()
+	if cachedResult, exists := m.hashCache[cacheKey]; exists {
+		m.cacheMux.RUnlock()
+		return bytes.Equal(cachedResult, m.GetRootHash())
 	}
+	m.cacheMux.RUnlock()
 
-	if bytes.Equal(node.Data, hash) {
-		return true
-	}
-
-	if node.Left == nil && node.Right == nil {
-		return false
-	}
-
-	return m.verifyHash(hash, node.Left) || m.verifyHash(hash, node.Right)
-}
-
-// GenerateProof generates a Merkle proof for the given data
-func (m *MerkleTree) GenerateProof(data []byte) [][]byte {
-	hash := sha256.Sum256(data)
-	proof := [][]byte{}
-	m.generateProofHelper(hash[:], m.RootNode, &proof, []byte{})
-	return proof
-}
-
-// generateProofHelper is a recursive helper for generating proofs
-func (m *MerkleTree) generateProofHelper(hash []byte, node *MerkleNode, proof *[][]byte, side []byte) bool {
-	if node == nil {
-		return false
-	}
-
-	// If we're at a leaf node and it's our target, we found the path
-	if node.Left == nil && node.Right == nil {
-		if bytes.Equal(node.Data, hash) {
+	// Check each leaf node
+	for _, leaf := range m.leafNodes {
+		if bytes.Equal(leaf.Data, dataHash) {
+			// Cache the result for future verifications
+			m.cacheMux.Lock()
+			m.hashCache[cacheKey] = m.GetRootHash()
+			m.cacheMux.Unlock()
 			return true
 		}
-		return false
-	}
-
-	// Try left subtree
-	if m.generateProofHelper(hash, node.Left, proof, []byte{0}) {
-		// Add the right node to the proof
-		*proof = append(*proof, node.Right.Data)
-		*proof = append(*proof, []byte{1}) // 1 indicates right side
-		return true
-	}
-
-	// Try right subtree
-	if m.generateProofHelper(hash, node.Right, proof, []byte{1}) {
-		// Add the left node to the proof
-		*proof = append(*proof, node.Left.Data)
-		*proof = append(*proof, []byte{0}) // 0 indicates left side
-		return true
 	}
 
 	return false
 }
 
-// VerifyProof verifies a Merkle proof
-func VerifyProof(data []byte, proof [][]byte, rootHash []byte) bool {
-	hash := sha256.Sum256(data)
-	currentHash := hash[:]
+// GenerateProof generates a Merkle proof for the given data
+func (m *MerkleTree) GenerateProof(data []byte) [][]byte {
+	if m.RootNode == nil {
+		return nil
+	}
 
-	for i := 0; i < len(proof); i += 2 {
-		side := proof[i+1][0]
-		proofElement := proof[i]
+	dataHash := calculateHash(data)
+	var proof [][]byte
+	var path []bool // left or right for each level
 
-		if side == 0 {
-			// The proof element is the left sibling
-			combined := append(proofElement, currentHash...)
-			h := sha256.Sum256(combined)
-			currentHash = h[:]
-		} else {
-			// The proof element is the right sibling
-			combined := append(currentHash, proofElement...)
-			h := sha256.Sum256(combined)
-			currentHash = h[:]
+	// Find the leaf node containing this data
+	var leafIndex int = -1
+	for i, leaf := range m.leafNodes {
+		if bytes.Equal(leaf.Data, dataHash) {
+			leafIndex = i
+			break
 		}
 	}
 
+	if leafIndex == -1 {
+		return nil // Data not found
+	}
+
+	// Compute path from leaf to root
+	nodes := m.leafNodes
+	currentIndex := leafIndex
+
+	for len(nodes) > 1 {
+		// If odd number of nodes, duplicate the last one
+		if len(nodes)%2 != 0 {
+			nodes = append(nodes, nodes[len(nodes)-1])
+			// If we're at the last position, update currentIndex
+			if currentIndex == len(nodes)-2 {
+				currentIndex = len(nodes) - 1
+			}
+		}
+
+		isOdd := currentIndex%2 != 0
+		siblingIndex := currentIndex
+		if isOdd {
+			siblingIndex--
+		} else {
+			siblingIndex++
+		}
+
+		// Add sibling to proof
+		proof = append(proof, nodes[siblingIndex].Data)
+		// Add direction to path
+		path = append(path, isOdd)
+
+		// Move to the parent node
+		var newNodes []*MerkleNode
+		for i := 0; i < len(nodes); i += 2 {
+			newNode := &MerkleNode{
+				Left:  nodes[i],
+				Right: nodes[i+1],
+				Data:  calculateHash(append(nodes[i].Data, nodes[i+1].Data...)),
+			}
+			newNodes = append(newNodes, newNode)
+		}
+
+		nodes = newNodes
+		currentIndex = currentIndex / 2
+	}
+
+	// Encode path into proof
+	pathBytes := make([]byte, (len(path)+7)/8) // Bit-packed representation
+	for i, isRight := range path {
+		if isRight {
+			byteIndex := i / 8
+			bitPosition := i % 8
+			pathBytes[byteIndex] |= (1 << bitPosition)
+		}
+	}
+
+	// Prepend path to proof
+	return append([][]byte{pathBytes}, proof...)
+}
+
+// VerifyProof verifies a Merkle proof against a root hash
+func VerifyProof(data []byte, proof [][]byte, rootHash []byte) bool {
+	if len(proof) == 0 {
+		return false
+	}
+
+	// Extract path from proof
+	pathBytes := proof[0]
+	siblings := proof[1:]
+
+	// Calculate hash of data
+	currentHash := calculateHash(data)
+
+	// Replay the proof
+	for i, sibling := range siblings {
+		isRight := false
+		if i/8 < len(pathBytes) {
+			isRight = (pathBytes[i/8] & (1 << (i % 8))) != 0
+		}
+
+		if isRight {
+			// Data is on the right side
+			currentHash = calculateHash(append(sibling, currentHash...))
+		} else {
+			// Data is on the left side
+			currentHash = calculateHash(append(currentHash, sibling...))
+		}
+	}
+
+	// Final hash should match root hash
 	return bytes.Equal(currentHash, rootHash)
+}
+
+// calculateHash calculates the SHA-256 hash of data
+func calculateHash(data []byte) []byte {
+	hash := sha256.Sum256(data)
+	return hash[:]
 }

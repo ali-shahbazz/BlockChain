@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -246,23 +247,33 @@ func generateShardID() []byte {
 
 // AddData adds data to the appropriate shard based on optimal placement
 func (amf *AdaptiveMerkleForest) AddData(data []byte) (string, string, error) {
-	amf.mutex.Lock()
-	defer amf.mutex.Unlock()
-
 	// Generate a unique ID for this data element
 	dataID := sha256.Sum256(append(data, generateShardID()...))
 	dataIDStr := string(dataID[:])
 
+	var shardID string
+	var shouldSplit bool
+
+	// First critical section: find shard and add data
+	amf.mutex.Lock()
 	// Find the optimal shard
-	shardID := amf.findOptimalShard(data)
+	shardID = amf.findOptimalShard(data)
 	shard := amf.shards[shardID]
 
 	// Add the data
 	shard.AddElement(dataIDStr, data)
 
-	// Check if shard should split after this addition
-	if shard.ShouldSplit(amf.maxShardSize, amf.maxShardOps) {
-		go amf.splitShard(shardID)
+	// Check if shard should split, but don't split yet (avoid nested locks)
+	shouldSplit = shard.ShouldSplit(amf.maxShardSize, amf.maxShardOps)
+	amf.mutex.Unlock()
+
+	// Now handle splitting if needed (in a separate critical section)
+	if shouldSplit {
+		err := amf.splitShard(shardID)
+		if err != nil {
+			// Log the error but continue - don't fail the operation
+			fmt.Printf("Warning: Failed to split shard %s: %v\n", shardID, err)
+		}
 	}
 
 	return dataIDStr, shardID, nil
@@ -276,20 +287,56 @@ func (amf *AdaptiveMerkleForest) GetData(dataID string, shardHint string) ([]byt
 	// First try the hint if provided
 	if shardHint != "" {
 		if shard, exists := amf.shards[shardHint]; exists {
+			// Check in the hinted shard
 			if data, found := shard.GetElement(dataID); found {
 				return data, nil
+			}
+
+			// If not found in the hinted shard, check its children recursively
+			// This handles cases where data might have been moved during shard splitting
+			if len(shard.ChildrenIDs) > 0 {
+				for _, childID := range shard.ChildrenIDs {
+					childIDStr := string(childID)
+					// Recursively check this child and its descendants
+					if data, err := amf.searchShardAndChildren(dataID, childIDStr); err == nil {
+						return data, nil
+					}
+				}
 			}
 		}
 	}
 
-	// Otherwise, search through all shards (inefficient but guaranteed)
-	for _, shard := range amf.shards {
-		if data, found := shard.GetElement(dataID); found {
+	// If still not found, search through all root shards as a fallback
+	for _, rootID := range amf.rootShards {
+		if data, err := amf.searchShardAndChildren(dataID, rootID); err == nil {
 			return data, nil
 		}
 	}
 
 	return nil, errors.New("data not found in any shard")
+}
+
+// searchShardAndChildren recursively searches for data in a shard and all its children
+func (amf *AdaptiveMerkleForest) searchShardAndChildren(dataID string, shardID string) ([]byte, error) {
+	shard, exists := amf.shards[shardID]
+	if !exists {
+		return nil, errors.New("shard not found")
+	}
+
+	// Check in this shard
+	if data, found := shard.GetElement(dataID); found {
+		return data, nil
+	}
+
+	// If not found here, check all children recursively
+	for _, childID := range shard.ChildrenIDs {
+		childIDStr := string(childID)
+		if data, err := amf.searchShardAndChildren(dataID, childIDStr); err == nil {
+			return data, nil
+		}
+	}
+
+	return nil, errors.New("data not found in this shard or its children")
 }
 
 // findOptimalShard selects the best shard to place new data
@@ -338,56 +385,91 @@ func (amf *AdaptiveMerkleForest) traverseToLeafShard(startShardID string, data [
 
 // splitShard divides a shard into multiple smaller shards
 func (amf *AdaptiveMerkleForest) splitShard(shardID string) error {
-	amf.mutex.Lock()
-	defer amf.mutex.Unlock()
+	// Get a copy of the data under a read lock first
+	var dataToRedistribute map[string][]byte
+	var parentShard *Shard
+	var exists bool
 
-	shard, exists := amf.shards[shardID]
+	// First critical section: read the source shard data
+	amf.mutex.RLock()
+	parentShard, exists = amf.shards[shardID]
 	if !exists {
+		amf.mutex.RUnlock()
 		return errors.New("shard not found")
 	}
 
 	// Skip if shard is already being modified
-	if shard.Status != ShardActive {
+	if parentShard.Status != ShardActive {
+		amf.mutex.RUnlock()
 		return errors.New("shard is not in active state")
 	}
 
-	shard.Status = ShardSplitting
+	// Make a copy of the data before modifying anything
+	dataToRedistribute = make(map[string][]byte)
+	parentShard.mutex.RLock()
+	for id, data := range parentShard.DataElements {
+		dataToRedistribute[id] = data
+	}
+	parentShard.mutex.RUnlock()
 
-	// Create two new shards
-	child1 := NewShard(generateShardID(), shard.ID)
-	child2 := NewShard(generateShardID(), shard.ID)
+	// End of first critical section
+	amf.mutex.RUnlock()
+
+	// Create two new shards (outside any lock)
+	child1 := NewShard(generateShardID(), parentShard.ID)
+	child2 := NewShard(generateShardID(), parentShard.ID)
 
 	child1IDStr := string(child1.ID)
 	child2IDStr := string(child2.ID)
 
-	// Add the new shards to the forest
-	amf.shards[child1IDStr] = child1
-	amf.shards[child2IDStr] = child2
-
-	// Update parent's children list
-	shard.ChildrenIDs = append(shard.ChildrenIDs, child1.ID, child2.ID)
-
-	// Update hierarchy map
-	amf.shardHierarchy[shardID] = append(amf.shardHierarchy[shardID],
-		child1IDStr, child2IDStr)
-
-	// Redistribute data elements
-	i := 0
-	for id, data := range shard.DataElements {
-		if i%2 == 0 {
+	// Distribute data to the new shards (outside any lock)
+	counter := 0
+	for id, data := range dataToRedistribute {
+		if counter%2 == 0 {
 			child1.AddElement(id, data)
 		} else {
 			child2.AddElement(id, data)
 		}
-		i++
+		counter++
 	}
 
-	// Clear parent's data but keep the structure intact
-	shard.DataElements = make(map[string][]byte)
-	shard.updateMerkleRoot()
+	// Second critical section: update the AMF structure with the new shards
+	amf.mutex.Lock()
 
-	// Update status
-	shard.Status = ShardActive
+	// Recheck that the shard still exists and is still active
+	parentShard, exists = amf.shards[shardID]
+	if !exists {
+		amf.mutex.Unlock()
+		return errors.New("shard no longer exists")
+	}
+
+	if parentShard.Status != ShardActive {
+		amf.mutex.Unlock()
+		return errors.New("shard is no longer in active state")
+	}
+
+	// Mark as splitting
+	parentShard.Status = ShardSplitting
+
+	// Add the new shards to the forest
+	amf.shards[child1IDStr] = child1
+	amf.shards[child2IDStr] = child2
+	amf.metrics[child1IDStr] = &child1.Metrics
+	amf.metrics[child2IDStr] = &child2.Metrics
+
+	// Update parent's children list
+	parentShard.ChildrenIDs = append(parentShard.ChildrenIDs, child1.ID, child2.ID)
+
+	// Update hierarchy map
+	if _, exists := amf.shardHierarchy[shardID]; !exists {
+		amf.shardHierarchy[shardID] = []string{}
+	}
+	amf.shardHierarchy[shardID] = append(amf.shardHierarchy[shardID], child1IDStr, child2IDStr)
+
+	// Mark as active again
+	parentShard.Status = ShardActive
+
+	amf.mutex.Unlock()
 
 	return nil
 }
@@ -493,15 +575,30 @@ func (amf *AdaptiveMerkleForest) VerifyDataInShard(data []byte, shardID string) 
 		return false, errors.New("shard not found")
 	}
 
-	// Hash the data
-	hash := sha256.Sum256(data)
-	dataHash := hash[:]
-
-	// Check against all element hashes
+	// Check if the exact data exists in any element in the shard
+	shard.mutex.RLock()
 	for _, elemData := range shard.DataElements {
-		elemHash := sha256.Sum256(elemData)
-		if bytes.Equal(dataHash, elemHash[:]) {
+		if bytes.Equal(data, elemData) {
+			shard.mutex.RUnlock()
 			return true, nil
+		}
+	}
+	shard.mutex.RUnlock()
+
+	// If not found in the shard itself, check its children
+	// This handles cases where data might have been moved during shard splitting
+	for _, childID := range shard.ChildrenIDs {
+		childIDStr := string(childID)
+		childShard, childExists := amf.shards[childIDStr]
+		if childExists {
+			childShard.mutex.RLock()
+			for _, elemData := range childShard.DataElements {
+				if bytes.Equal(data, elemData) {
+					childShard.mutex.RUnlock()
+					return true, nil
+				}
+			}
+			childShard.mutex.RUnlock()
 		}
 	}
 

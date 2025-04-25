@@ -33,6 +33,13 @@ const (
 	AuditorNode
 )
 
+// BehaviorRecord tracks a node's behavior history
+type BehaviorRecord struct {
+	Positive  bool
+	Timestamp time.Time
+	Weight    float64
+}
+
 // NodeReputation tracks the reputation of a node in the network
 type NodeReputation struct {
 	NodeID             string
@@ -48,7 +55,23 @@ type NodeReputation struct {
 	Status             NodeStatus
 	Type               NodeType
 	JoinTime           time.Time
-	TrustScore         float64 // 0.0-1.0, derived from multiple factors
+	TrustScore         float64          // 0.0-1.0, derived from multiple factors
+	LastSignature      []byte           // Last signature produced by this node
+	Score              float64          // General score value
+	BehaviorHistory    []BehaviorRecord // History of node behavior
+	ConsecutiveFaults  int              // Count of consecutive faults
+}
+
+// proofCacheEntry stores cached VRF proofs
+type proofCacheEntry struct {
+	proof     []byte
+	timestamp time.Time
+}
+
+// Monitor interface for monitoring BFT behavior
+type Monitor interface {
+	RecordVRFVerification(nodeID string, success bool)
+	ReportByzantineNode(nodeID string, suspiciousScore float64)
 }
 
 // ByzantineFaultTolerance implements advanced BFT resilience mechanisms
@@ -68,6 +91,10 @@ type ByzantineFaultTolerance struct {
 	auditInterval          time.Duration
 	suspectTimeout         time.Duration
 	verificationProtocol   VerificationProtocol
+	proofCache             map[string]proofCacheEntry
+	monitor                Monitor
+	byzantineNodes         map[string]bool
+	blockVotes             map[string][]ConsensusVote // Map of blockHash to votes
 }
 
 // VerificationProtocol defines the cryptographic verification approach
@@ -100,6 +127,7 @@ type ConsensusVote struct {
 	VRFProof     []byte
 	RoundNumber  int
 	IsCommitVote bool
+	BlockHeight  int64 // Adding the BlockHeight field
 }
 
 // VoteType represents different types of votes in the consensus process
@@ -127,6 +155,9 @@ func NewByzantineFaultTolerance() *ByzantineFaultTolerance {
 		auditInterval:          time.Minute * 10,
 		suspectTimeout:         time.Second * 30,
 		verificationProtocol:   StandardVerification,
+		proofCache:             make(map[string]proofCacheEntry),
+		byzantineNodes:         make(map[string]bool),
+		blockVotes:             make(map[string][]ConsensusVote),
 	}
 }
 
@@ -148,6 +179,8 @@ func (bft *ByzantineFaultTolerance) RegisterNode(nodeID string, nodeType NodeTyp
 		JoinTime:        time.Now(),
 		TrustScore:      0.5, // Initial neutral trust
 		ResponseTime:    make([]time.Duration, 0),
+		LastSignature:   []byte{}, // Initialize with empty signature
+		BehaviorHistory: make([]BehaviorRecord, 0),
 	}
 
 	// If this is the first node, set as leader
@@ -469,95 +502,245 @@ func (bft *ByzantineFaultTolerance) GenerateVRFProof(nodeID string, data []byte)
 	return h.Sum(nil), nil
 }
 
-// VerifyVRFProof verifies a VRF proof against the data and node
+// VerifyVRFProof implements VRF proof verification with enhanced security
 func (bft *ByzantineFaultTolerance) VerifyVRFProof(nodeID string, data []byte, proof []byte) bool {
-	bft.mutex.RLock()
-	defer bft.mutex.RUnlock()
-
-	// Check if the node exists
-	_, exists := bft.nodes[nodeID]
-	if !exists {
-		return false
-	}
-
-	// For simplicity, in this implementation we'll consider all proofs valid if they are non-empty
-	// In a real implementation, this would perform cryptographic verification
-	if proof == nil || len(proof) == 0 {
-		return false
-	}
-
-	// Create a deterministic validation
-	h := sha256.New()
-	h.Write([]byte(nodeID))
-	h.Write(data)
-	h.Write(proof)
-
-	// Determine validity based on the first byte
-	return h.Sum(nil)[0] < 240 // ~94% chance of being valid
-}
-
-// PerformSecurityAudit performs a comprehensive security audit of nodes
-func (bft *ByzantineFaultTolerance) PerformSecurityAudit() {
 	bft.mutex.Lock()
 	defer bft.mutex.Unlock()
 
+	// Check cache for previously verified proofs
+	h := sha256.New()
+	h.Write([]byte(nodeID))
+	h.Write(data)
+	cacheKey := string(h.Sum(nil))
+
+	if cached, exists := bft.proofCache[cacheKey]; exists {
+		// If we've seen this proof before and verified it, just return true
+		if bytes.Equal(cached.proof, proof) {
+			return true
+		}
+	}
+
+	// For a proper implementation, we would use crypto library's VRF verification
+	// For this simplified version, we'll reconstruct a proof similar to how it was generated
+	// and compare it with the provided proof
+
+	// First, we'll create a hash with the same inputs as GenerateVRFProof
+	// but excluding the time component which we don't know
+	h2 := sha256.New()
+	h2.Write([]byte(nodeID))
+	h2.Write(data)
+	baseHash := h2.Sum(nil)
+
+	// Since our GenerateVRFProof includes a timestamp which we can't know exactly,
+	// we'll verify the proof by checking if it's derived from the same inputs
+	// This is done by comparing the first several bytes (which should match regardless of timestamp)
+	// and checking if the overall hash structure is valid
+
+	// Minimum required matching bytes to consider a valid proof
+	const minMatchBytes = 4
+	matchCount := 0
+
+	// Count matching bytes in the prefix
+	for i := 0; i < minMatchBytes && i < len(baseHash) && i < len(proof); i++ {
+		if baseHash[i] == proof[i] {
+			matchCount++
+		}
+	}
+
+	// Check if proof has a valid SHA-256 structure (32 bytes length)
+	isValidHashLength := len(proof) == 32
+
+	// Successfully verified if enough prefix bytes match and it has valid hash length
+	if matchCount >= minMatchBytes && isValidHashLength {
+		// Cache this proof for future verifications
+		bft.proofCache[cacheKey] = proofCacheEntry{
+			proof:     proof,
+			timestamp: time.Now(),
+		}
+
+		// If we have a monitor, record successful verification
+		if bft.monitor != nil {
+			bft.monitor.RecordVRFVerification(nodeID, true)
+		}
+
+		return true
+	}
+
+	// If verification failed and we have a monitor, record the failure
+	if bft.monitor != nil {
+		bft.monitor.RecordVRFVerification(nodeID, false)
+	}
+
+	return false
+}
+
+// storeTrustedProof caches successful VRF proofs to speed up future verifications
+func (bft *ByzantineFaultTolerance) storeTrustedProof(nodeID string, data []byte, proof []byte) {
+	bft.mutex.Lock()
+	defer bft.mutex.Unlock()
+
+	// Create cache key from nodeID and data
+	h := sha256.New()
+	h.Write([]byte(nodeID))
+	h.Write(data)
+	cacheKey := string(h.Sum(nil))
+
+	// Store in cache with expiration
+	bft.proofCache[cacheKey] = proofCacheEntry{
+		proof:     proof,
+		timestamp: time.Now(),
+	}
+
+	// Cleanup old cache entries occasionally
+	// Use crypto/rand instead of math/rand for Intn
+	randNum, err := rand.Int(rand.Reader, big.NewInt(100))
+	if err == nil && randNum.Int64() < 5 { // 5% chance to trigger cleanup
+		bft.cleanupProofCache()
+	}
+}
+
+// cleanupProofCache removes old proof cache entries
+func (bft *ByzantineFaultTolerance) cleanupProofCache() {
+	expiration := time.Now().Add(-15 * time.Minute)
+	for key, entry := range bft.proofCache {
+		if entry.timestamp.Before(expiration) {
+			delete(bft.proofCache, key)
+		}
+	}
+}
+
+// recordNodeBehavior updates a node's behavior history
+func (bft *ByzantineFaultTolerance) recordNodeBehavior(nodeID string, positive bool) {
+	bft.mutex.Lock()
+	defer bft.mutex.Unlock()
+
+	node, exists := bft.nodes[nodeID]
+	if !exists {
+		return
+	}
+
+	// Add behavior to history with time decay
+	weight := 1.0
 	now := time.Now()
 
-	// Check for nodes that haven't been audited recently
-	for nodeID, node := range bft.nodes {
-		// Apply reputation decay over time
-		node.ReputationScore *= bft.reputationDecayFactor
+	// Apply time decay to older records
+	for i, record := range node.BehaviorHistory {
+		age := now.Sub(record.Timestamp).Minutes()
+		if age > 60 { // Older than 1 hour
+			// Remove old records
+			if len(node.BehaviorHistory) > i {
+				node.BehaviorHistory = node.BehaviorHistory[i:]
+			}
+			break
+		}
 
-		// Check suspicious nodes more thoroughly
-		if node.Status == NodeSuspect {
-			// If suspicious for too long with no further issues, gradually rehabilitate
-			if time.Since(node.LastMisbehavior) > time.Hour {
-				node.ReputationScore += bft.reputationRecoveryRate
+		// Decay weight based on age
+		decayFactor := 1.0 - (age/60.0)*0.5 // 50% decay over an hour
+		record.Weight = record.Weight * decayFactor
+		node.BehaviorHistory[i] = record
+	}
 
-				// If reputation has recovered, return to active status
-				if node.ReputationScore >= bft.baselineThreshold {
-					node.Status = NodeActive
+	// Add new record
+	node.BehaviorHistory = append(node.BehaviorHistory, BehaviorRecord{
+		Positive:  positive,
+		Timestamp: now,
+		Weight:    weight,
+	})
+
+	// Update node's score based on behavior history
+	totalWeight := 0.0
+	positiveWeight := 0.0
+
+	for _, record := range node.BehaviorHistory {
+		totalWeight += record.Weight
+		if record.Positive {
+			positiveWeight += record.Weight
+		}
+	}
+
+	if totalWeight > 0 {
+		node.Score = positiveWeight / totalWeight
+	}
+
+	// Record this node as potentially Byzantine if score drops too low
+	if node.Score < 0.3 && node.ConsecutiveFaults > 5 {
+		bft.byzantineNodes[nodeID] = true
+	}
+
+	// Update consecutive faults counter
+	if positive {
+		node.ConsecutiveFaults = 0
+	} else {
+		node.ConsecutiveFaults++
+	}
+
+	bft.nodes[nodeID] = node
+}
+
+// DetectByzantinePatterns analyzes node behavior to detect Byzantine patterns
+func (bft *ByzantineFaultTolerance) DetectByzantinePatterns() {
+	bft.mutex.Lock()
+	defer bft.mutex.Unlock()
+
+	// Reset detection
+	suspiciousNodes := make(map[string]float64)
+
+	// Analyze voting patterns
+	for _, votes := range bft.blockVotes {
+		if len(votes) < 3 {
+			continue // Not enough votes to analyze
+		}
+
+		// Check for conflicting votes from the same node
+		nodeVotes := make(map[string][]ConsensusVote)
+		for _, vote := range votes {
+			nodeVotes[vote.NodeID] = append(nodeVotes[vote.NodeID], vote)
+		}
+
+		for nodeID, nodeVoteList := range nodeVotes {
+			if len(nodeVoteList) > 1 {
+				// Node has multiple votes for the same block - suspicious
+				suspiciousNodes[nodeID] = suspiciousNodes[nodeID] + 1.0
+			}
+
+			// Check for votes with invalid VRF proofs
+			for _, vote := range nodeVoteList {
+				if !bft.VerifyVRFProof(vote.NodeID, vote.BlockHash, vote.VRFProof) {
+					suspiciousNodes[nodeID] = suspiciousNodes[nodeID] + 0.5
 				}
 			}
 		}
 
-		// Check for Byzantine behavior patterns
-		if bft.detectByzantinePattern(nodeID) {
-			node.Status = NodeByzantine
-			node.ReputationScore = 0
-			bft.activeFaults[nodeID] = now
+		// Check for equivocation (voting for conflicting blocks at the same height)
+		blockHeights := make(map[string]int64)
+		for _, vote := range votes {
+			if height, exists := blockHeights[vote.NodeID]; exists {
+				if height != vote.BlockHeight && vote.IsCommitVote {
+					// Node committed to conflicting blocks at the same height
+					suspiciousNodes[vote.NodeID] = suspiciousNodes[vote.NodeID] + 2.0
+				}
+			} else {
+				blockHeights[vote.NodeID] = vote.BlockHeight
+			}
 		}
+	}
+	// Identify Byzantine nodes based on suspicious score
+	for nodeID, suspiciousScore := range suspiciousNodes {
+		if suspiciousScore > 3.0 {
+			bft.byzantineNodes[nodeID] = true
 
-		// Remove from active faults if reputation has recovered
-		if node.Status == NodeActive {
-			delete(bft.activeFaults, nodeID)
+			// Update node score
+			if node, exists := bft.nodes[nodeID]; exists {
+				node.Score = math.Max(0.01, node.Score-0.2) // Reduce score but keep above 0
+				bft.nodes[nodeID] = node
+			}
+
+			// If using a monitor, report the Byzantine node
+			if bft.monitor != nil {
+				bft.monitor.ReportByzantineNode(nodeID, suspiciousScore)
+			}
 		}
-
-		// Update trust score after audit
-		bft.updateNodeTrustScore(node)
 	}
-}
-
-// detectByzantinePattern implements advanced Byzantine behavior detection
-func (bft *ByzantineFaultTolerance) detectByzantinePattern(nodeID string) bool {
-	node := bft.nodes[nodeID]
-
-	// Pattern 1: High rate of invalid blocks
-	if node.ValidBlocks > 10 && float64(node.InvalidBlocks)/float64(node.ValidBlocks+node.InvalidBlocks) > 0.3 {
-		return true
-	}
-
-	// Pattern 2: Consecutive consensus failures
-	if node.ConsensusFailures >= 5 {
-		return true
-	}
-
-	// Pattern 3: Very low reputation for extended period
-	if node.ReputationScore < 0.2 && time.Since(node.LastMisbehavior) < time.Hour*24 {
-		return true
-	}
-
-	return false
 }
 
 // GetHealthStatus returns the overall health of the BFT system
@@ -624,4 +807,74 @@ func (bft *ByzantineFaultTolerance) StartAuditRoutine() chan struct{} {
 	}()
 
 	return stopChan
+}
+
+// PerformSecurityAudit conducts a comprehensive security review of the BFT system
+func (bft *ByzantineFaultTolerance) PerformSecurityAudit() {
+	bft.mutex.Lock()
+	defer bft.mutex.Unlock()
+
+	// 1. Detect Byzantine patterns (double voting, equivocation)
+	bft.DetectByzantinePatterns()
+
+	// 2. Check for nodes that have been faulty for too long
+	now := time.Now()
+	for nodeID, faultTime := range bft.activeFaults {
+		// If a node has been faulty for over an hour, mark as Byzantine
+		if now.Sub(faultTime) > time.Hour {
+			if node, exists := bft.nodes[nodeID]; exists {
+				node.Status = NodeByzantine
+				bft.byzantineNodes[nodeID] = true
+				bft.nodes[nodeID] = node
+			}
+			delete(bft.activeFaults, nodeID) // Remove from active faults since it's now Byzantine
+		}
+	}
+
+	// 3. Heal nodes that have been behaving well
+	for nodeID, node := range bft.nodes {
+		if node.Status == NodeSuspect {
+			// If no misbehavior for a while, restore to active
+			if now.Sub(node.LastMisbehavior) > time.Minute*30 {
+				node.Status = NodeActive
+				bft.nodes[nodeID] = node
+			}
+		} else if node.Status == NodeFaulty {
+			// If no misbehavior for a long time, upgrade to suspect
+			if now.Sub(node.LastMisbehavior) > time.Hour*3 {
+				node.Status = NodeSuspect
+				bft.nodes[nodeID] = node
+				delete(bft.activeFaults, nodeID)
+			}
+		}
+	}
+
+	// 4. Adjust reputation scores based on time
+	for nodeID, node := range bft.nodes {
+		// Slowly decay reputation scores toward the mean
+		if node.ReputationScore > 0.5 {
+			// High scores decay slowly
+			node.ReputationScore = math.Max(0.5, node.ReputationScore*bft.reputationDecayFactor)
+		} else {
+			// Low scores recover slightly
+			node.ReputationScore = math.Min(0.5, node.ReputationScore+(1-node.ReputationScore)*bft.reputationRecoveryRate)
+		}
+		bft.nodes[nodeID] = node
+	}
+
+	// 5. Clean up old cached proofs
+	bft.cleanupProofCache()
+
+	// 6. Clean up old vote records
+	// Only keep votes from the last 100 blocks to limit memory usage
+	if len(bft.blockVotes) > 100 {
+		// Sort block hashes by age (if we had timestamps, we'd use those)
+		// For this simplified version, we'll just remove random blocks
+		for blockHash := range bft.blockVotes {
+			if len(bft.blockVotes) <= 100 {
+				break
+			}
+			delete(bft.blockVotes, blockHash)
+		}
+	}
 }
