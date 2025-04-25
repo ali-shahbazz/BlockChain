@@ -1,0 +1,4 @@
+[BLOCKCHAIN] 2025/04/25 19:23:00.314730 main.go:44: Logging initialized. Log file: logs\blockchain_2025-04-25_19-23-00.log
+[BLOCKCHAIN] 2025/04/25 19:23:00.322863 blockchain.go:50: Adding new block to blockchain at height 1
+[BLOCKCHAIN] 2025/04/25 19:23:03.323313 blockchain.go:82: Timeout occurred while adding block
+[BLOCKCHAIN] 2025/04/25 19:23:03.323513 main.go:128: Failed to add block: timeout occurred while adding block

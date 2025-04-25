@@ -1,0 +1,2 @@
+[BLOCKCHAIN] 2025/04/25 19:24:37.542382 main.go:44: Logging initialized. Log file: logs\blockchain_2025-04-25_19-24-37.log
+[BLOCKCHAIN] 2025/04/25 19:24:37.555593 blockchain.go:41: Adding new block to blockchain at height 1

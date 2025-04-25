@@ -1,0 +1,21 @@
+[BLOCKCHAIN] 2025/04/25 20:36:53.208935 main.go:45: Logging initialized. Log file: logs\blockchain_2025-04-25_20-36-53.log
+[BLOCKCHAIN] 2025/04/25 20:36:53.231676 main.go:274: Starting consensus voting process for block 00006e35d937f43ae47912ed29728f8c1aa59aa33a1fd611a9491526bf506e88 with proposer validator-2
+[BLOCKCHAIN] 2025/04/25 20:36:53.232474 main.go:307: Submitting vote from validator validator-1
+[BLOCKCHAIN] 2025/04/25 20:36:53.233999 main.go:312: Vote from validator-1 accepted
+[BLOCKCHAIN] 2025/04/25 20:36:53.237920 hybrid_consensus.go:340: Current consensus progress: 100.00% (threshold: 67.00%)
+[BLOCKCHAIN] 2025/04/25 20:36:53.242374 hybrid_consensus.go:347: Consensus reached for block 00006e35d937f43ae47912ed29728f8c1aa59aa33a1fd611a9491526bf506e88 with 100.00% votes
+[BLOCKCHAIN] 2025/04/25 20:36:53.288353 main.go:283: Skipping vote from proposer validator-2 (already implied)
+[BLOCKCHAIN] 2025/04/25 20:36:53.289036 main.go:307: Submitting vote from validator validator-3
+[BLOCKCHAIN] 2025/04/25 20:36:53.289514 main.go:310: Vote from validator-3 failed: consensus protocol not in voting state
+[BLOCKCHAIN] 2025/04/25 20:36:53.340698 main.go:307: Submitting vote from validator validator-4
+[BLOCKCHAIN] 2025/04/25 20:36:53.340698 main.go:310: Vote from validator-4 failed: consensus protocol not in voting state
+[BLOCKCHAIN] 2025/04/25 20:36:53.391629 main.go:307: Submitting vote from validator validator-5
+[BLOCKCHAIN] 2025/04/25 20:36:53.391792 main.go:310: Vote from validator-5 failed: consensus protocol not in voting state
+[BLOCKCHAIN] 2025/04/25 20:36:53.443804 main.go:325: Finalizing block 00006e35d937f43ae47912ed29728f8c1aa59aa33a1fd611a9491526bf506e88
+[BLOCKCHAIN] 2025/04/25 20:36:53.444715 blockchain.go:41: Adding new block to blockchain at height 1
+[BLOCKCHAIN] 2025/04/25 20:37:03.214884 main.go:265: Block creation timed out after 10 seconds
+[BLOCKCHAIN] 2025/04/25 20:37:03.215041 main.go:116: Block creation 1 failed: block creation timed out
+[BLOCKCHAIN] 2025/04/25 20:37:13.217187 main.go:265: Block creation timed out after 10 seconds
+[BLOCKCHAIN] 2025/04/25 20:37:13.217187 main.go:116: Block creation 2 failed: block creation timed out
+[BLOCKCHAIN] 2025/04/25 20:37:23.218054 main.go:265: Block creation timed out after 10 seconds
+[BLOCKCHAIN] 2025/04/25 20:37:23.218948 main.go:116: Block creation 3 failed: block creation timed out

@@ -1,0 +1,18 @@
+[BLOCKCHAIN] 2025/04/25 20:47:23.458656 main.go:44: Logging initialized. Log file: logs\blockchain_2025-04-25_20-47-23.log
+[BLOCKCHAIN] 2025/04/25 20:47:23.490957 main.go:287: Starting consensus voting process for block 00000b55b0657b670174401deaff79f7079645a5d336c08f3b1eecf8120ea82a with proposer validator-5
+[BLOCKCHAIN] 2025/04/25 20:47:23.490957 main.go:320: Submitting vote from validator validator-1
+[BLOCKCHAIN] 2025/04/25 20:47:23.491959 main.go:325: Vote from validator-1 accepted
+[BLOCKCHAIN] 2025/04/25 20:47:23.491959 hybrid_consensus.go:340: Current consensus progress: 100.00% (threshold: 67.00%)
+[BLOCKCHAIN] 2025/04/25 20:47:23.499510 hybrid_consensus.go:347: Consensus reached for block 00000b55b0657b670174401deaff79f7079645a5d336c08f3b1eecf8120ea82a with 100.00% votes
+[BLOCKCHAIN] 2025/04/25 20:47:23.542698 main.go:320: Submitting vote from validator validator-2
+[BLOCKCHAIN] 2025/04/25 20:47:23.543863 main.go:323: Vote from validator-2 failed: consensus protocol not in voting state
+[BLOCKCHAIN] 2025/04/25 20:47:23.596849 main.go:320: Submitting vote from validator validator-3
+[BLOCKCHAIN] 2025/04/25 20:47:23.596849 main.go:323: Vote from validator-3 failed: consensus protocol not in voting state
+[BLOCKCHAIN] 2025/04/25 20:47:23.648004 main.go:320: Submitting vote from validator validator-4
+[BLOCKCHAIN] 2025/04/25 20:47:23.648004 main.go:323: Vote from validator-4 failed: consensus protocol not in voting state
+[BLOCKCHAIN] 2025/04/25 20:47:23.699012 main.go:296: Skipping vote from proposer validator-5 (already implied)
+[BLOCKCHAIN] 2025/04/25 20:47:23.699873 main.go:338: Finalizing block 00000b55b0657b670174401deaff79f7079645a5d336c08f3b1eecf8120ea82a
+[BLOCKCHAIN] 2025/04/25 20:47:23.700415 blockchain.go:41: Adding new block to blockchain at height 1
+[BLOCKCHAIN] 2025/04/25 20:47:26.465062 main.go:277: Block creation timed out after 3 seconds
+[BLOCKCHAIN] 2025/04/25 20:47:29.966204 main.go:277: Block creation timed out after 3 seconds
+[BLOCKCHAIN] 2025/04/25 20:47:33.468122 main.go:277: Block creation timed out after 3 seconds

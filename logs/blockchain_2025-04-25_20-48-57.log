@@ -1,0 +1,16 @@
+[BLOCKCHAIN] 2025/04/25 20:48:57.019673 main.go:44: Logging initialized. Log file: logs\blockchain_2025-04-25_20-48-57.log
+[BLOCKCHAIN] 2025/04/25 20:48:57.075433 main.go:309: Starting consensus voting process for block 00009b730d064c778e863e4cfdc5c001bb030167f8ad675117a27d35a4911565 with proposer validator-3
+[BLOCKCHAIN] 2025/04/25 20:48:57.076436 main.go:342: Submitting vote from validator validator-1
+[BLOCKCHAIN] 2025/04/25 20:48:57.076436 main.go:347: Vote from validator-1 accepted
+[BLOCKCHAIN] 2025/04/25 20:48:57.076436 hybrid_consensus.go:340: Current consensus progress: 100.00% (threshold: 67.00%)
+[BLOCKCHAIN] 2025/04/25 20:48:57.081787 hybrid_consensus.go:347: Consensus reached for block 00009b730d064c778e863e4cfdc5c001bb030167f8ad675117a27d35a4911565 with 100.00% votes
+[BLOCKCHAIN] 2025/04/25 20:48:57.127681 main.go:342: Submitting vote from validator validator-2
+[BLOCKCHAIN] 2025/04/25 20:48:57.127797 main.go:345: Vote from validator-2 failed: consensus protocol not in voting state
+[BLOCKCHAIN] 2025/04/25 20:48:57.179303 main.go:318: Skipping vote from proposer validator-3 (already implied)
+[BLOCKCHAIN] 2025/04/25 20:48:57.179303 main.go:342: Submitting vote from validator validator-4
+[BLOCKCHAIN] 2025/04/25 20:48:57.179303 main.go:345: Vote from validator-4 failed: consensus protocol not in voting state
+[BLOCKCHAIN] 2025/04/25 20:48:57.230365 main.go:342: Submitting vote from validator validator-5
+[BLOCKCHAIN] 2025/04/25 20:48:57.230365 main.go:345: Vote from validator-5 failed: consensus protocol not in voting state
+[BLOCKCHAIN] 2025/04/25 20:48:57.281736 main.go:360: Finalizing block 00009b730d064c778e863e4cfdc5c001bb030167f8ad675117a27d35a4911565
+[BLOCKCHAIN] 2025/04/25 20:48:57.282734 blockchain.go:41: Adding new block to blockchain at height 1
+[BLOCKCHAIN] 2025/04/25 20:49:00.028601 main.go:299: Block creation timed out after 3 seconds
