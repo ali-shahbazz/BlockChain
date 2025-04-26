@@ -26,17 +26,6 @@ func TestByzantineFaultTolerance(t *testing.T) {
 	// Record a failure for one node
 	bft.RecordBlockValidation(nodeIDs[3], []byte("block-hash"), false)
 
-	// Generate VRF proof
-	proof, err := bft.GenerateVRFProof(nodeIDs[0], []byte("data"))
-	if err != nil {
-		t.Errorf("Failed to generate VRF proof: %v", err)
-	}
-
-	// Verify VRF proof
-	if !bft.VerifyVRFProof(nodeIDs[0], []byte("data"), proof) {
-		t.Errorf("Failed to verify VRF proof")
-	}
-
 	// Check node scores
 	for _, nodeID := range nodeIDs[:3] {
 		score, err := bft.GetNodeScore(nodeID)
@@ -64,4 +53,48 @@ func TestByzantineFaultTolerance(t *testing.T) {
 	}
 
 	t.Logf("BFT test passed with leader: %s", leader)
+}
+
+// TestVRFProofVerification tests the generation and verification of VRF proofs
+func TestVRFProofVerification(t *testing.T) {
+	// Create a new BFT system
+	bft := NewByzantineFaultTolerance()
+
+	// Register a node
+	nodeID := "test-node-1"
+	err := bft.RegisterNode(nodeID, ValidatorNode)
+	if err != nil {
+		t.Fatalf("Failed to register node: %v", err)
+	}
+
+	// Generate test data
+	testData := []byte("test data for VRF proof")
+
+	// Generate VRF proof
+	proof, err := bft.GenerateVRFProof(nodeID, testData)
+	if err != nil {
+		t.Fatalf("Failed to generate VRF proof: %v", err)
+	}
+
+	// Verify the length of the proof (should be SHA-256 hash length)
+	if len(proof) != 32 {
+		t.Errorf("Expected proof length of 32 bytes, got %d bytes", len(proof))
+	}
+
+	// Verify the proof
+	if !bft.VerifyVRFProof(nodeID, testData, proof) {
+		t.Errorf("Failed to verify a valid VRF proof")
+	}
+
+	// Try with wrong data - should fail verification
+	wrongData := []byte("wrong data")
+	if bft.VerifyVRFProof(nodeID, wrongData, proof) {
+		t.Errorf("Verification succeeded with wrong data")
+	}
+
+	// Try with wrong proof - should fail verification
+	wrongProof := []byte("wrong proof that is definitely not correct")
+	if bft.VerifyVRFProof(nodeID, testData, wrongProof) {
+		t.Errorf("Verification succeeded with wrong proof")
+	}
 }

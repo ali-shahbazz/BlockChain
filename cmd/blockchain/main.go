@@ -1,11 +1,18 @@
 package main
 
 import (
+	"bytes"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 
 	"blockchain-a3/internal/consensus"
@@ -56,7 +63,7 @@ func main() {
 
 	// Start a goroutine that will force termination after program completes
 	go func() {
-		time.Sleep(30 * time.Second) // Maximum program duration
+		time.Sleep(5 * time.Minute) // Increased timeout to allow UI interaction
 		fmt.Println("\nForcing program termination after timeout...")
 		os.Exit(0) // Force clean exit
 	}()
@@ -176,9 +183,14 @@ func main() {
 		fmt.Println("4. Advanced conflict resolution")
 		fmt.Println("5. Hybrid consensus with entropy-based validation")
 
-		// Explicitly terminate the program after completion
-		fmt.Println("\nExiting program...")
-		os.Exit(0)
+		// Start the API server for the UI
+		fmt.Println("\nStarting API server for blockchain UI...")
+		startAPIServer(blockchain, aco, hybridConsensus, conflictResolver, forest)
+		fmt.Println("API server started at http://localhost:8080")
+		fmt.Println("\nThe web UI is now available. Please open a browser and navigate to http://localhost:8080")
+
+		// Wait indefinitely instead of exiting
+		select {}
 	}()
 
 	// Wait for program to signal completion
@@ -516,4 +528,377 @@ func demonstrateConflictResolution(cr *consensus.AdvancedConflictResolver) {
 	summary := cr.GetConflictSummary()
 	fmt.Printf("- Active conflicts: %d\n", summary["activeConflicts"])
 	fmt.Printf("- Resolved conflicts: %d\n", summary["resolvedConflicts"])
+}
+
+// BlockResponse is a JSON-friendly struct for Block data
+type BlockResponse struct {
+	Height           int64             `json:"height"`
+	Hash             string            `json:"hash"`
+	PrevBlockHash    string            `json:"prevBlockHash"`
+	Timestamp        int64             `json:"timestamp"`
+	MerkleRoot       string            `json:"merkleRoot"`
+	Nonce            int64             `json:"nonce"`
+	TransactionCount int               `json:"transactionCount"`
+	EntropyFactor    float64           `json:"entropyFactor"`
+	ShardID          string            `json:"shardID"`
+	VectorClock      map[string]uint64 `json:"vectorClock"`
+}
+
+// TransactionResponse is a JSON-friendly struct for Transaction data
+type TransactionResponse struct {
+	ID         string `json:"id"`
+	Timestamp  int64  `json:"timestamp"`
+	Data       string `json:"data"`
+	IsCoinbase bool   `json:"isCoinbase"`
+}
+
+// ConsensusStatusResponse is a JSON-friendly struct for consensus status
+type ConsensusStatusResponse struct {
+	State            string  `json:"state"`
+	LeadingVoteCount int     `json:"leadingVoteCount"`
+	NetworkHealth    float64 `json:"networkHealth"`
+	PartitionProb    float64 `json:"partitionProbability"`
+	ConsistencyLevel string  `json:"consistencyLevel"`
+}
+
+// GlobalStatsResponse holds system-wide statistics
+type GlobalStatsResponse struct {
+	BlockchainHeight    int64   `json:"blockchainHeight"`
+	TotalTransactions   int     `json:"totalTransactions"`
+	AverageEntropyScore float64 `json:"averageEntropyScore"`
+	ShardCount          int     `json:"shardCount"`
+	ActiveConflicts     int     `json:"activeConflicts"`
+	ResolvedConflicts   int     `json:"resolvedConflicts"`
+}
+
+// startAPIServer starts the HTTP API server for blockchain UI
+func startAPIServer(bc *core.Blockchain, aco *consensus.AdaptiveConsistencyOrchestrator,
+	hc *consensus.HybridConsensusProtocol, cr *consensus.AdvancedConflictResolver,
+	forest *crypto.AdaptiveMerkleForest) {
+	// Configure CORS middleware
+	corsMiddleware := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+			if r.Method == "OPTIONS" {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+
+	// Start static file server for frontend
+	fs := http.FileServer(http.Dir("./ui/public"))
+	http.Handle("/", http.StripPrefix("/", fs))
+
+	// Add status endpoint (combines blockchain and consensus data)
+	http.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
+		// Get blockchain data
+		height := bc.GetHeight()
+		totalTx := 0
+		iterator := bc.Iterator()
+		for {
+			block := iterator.Next()
+			if block == nil {
+				break
+			}
+			totalTx += len(block.Transactions)
+		}
+
+		// Get consensus data
+		consensusStatus := hc.GetConsensusStatus()
+		consistencyLevel := aco.GetConsistencyLevel()
+		var levelStr string
+		switch consistencyLevel {
+		case consensus.StrongConsistency:
+			levelStr = "strong"
+		case consensus.CausalConsistency:
+			levelStr = "causal"
+		case consensus.SessionConsistency:
+			levelStr = "session"
+		case consensus.EventualConsistency:
+			levelStr = "eventual"
+		}
+
+		partitionProb := aco.GetPartitionProbability()
+		networkHealth := 1.0 - float64(partitionProb)
+
+		// Create combined response
+		response := struct {
+			Height               int64   `json:"height"`
+			Transactions         int     `json:"transactionCount"`
+			ConsistencyLevel     string  `json:"consistencyLevel"`
+			NetworkHealth        float64 `json:"networkHealth"`
+			PartitionProbability float64 `json:"partitionProbability"`
+			State                string  `json:"consensusState"`
+			LeadingVoteCount     int     `json:"leadingVoteCount"`
+		}{
+			Height:               height,
+			Transactions:         totalTx,
+			ConsistencyLevel:     levelStr,
+			NetworkHealth:        networkHealth,
+			PartitionProbability: float64(partitionProb),
+			State:                fmt.Sprintf("%v", consensusStatus["state"]),
+			LeadingVoteCount:     5, // Mock data for leading vote count
+		}
+
+		// Return JSON response
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	})
+
+	// Add consensus endpoint for backward compatibility
+	http.HandleFunc("/api/consensus", func(w http.ResponseWriter, r *http.Request) {
+		// Get consensus data
+		consensusStatus := hc.GetConsensusStatus()
+		consistencyLevel := aco.GetConsistencyLevel()
+		var levelStr string
+		switch consistencyLevel {
+		case consensus.StrongConsistency:
+			levelStr = "strong"
+		case consensus.CausalConsistency:
+			levelStr = "causal"
+		case consensus.SessionConsistency:
+			levelStr = "session"
+		case consensus.EventualConsistency:
+			levelStr = "eventual"
+		}
+
+		partitionProb := aco.GetPartitionProbability()
+		networkHealth := 1.0 - float64(partitionProb)
+
+		// Create response
+		response := struct {
+			ConsistencyLevel     string  `json:"consistencyLevel"`
+			NetworkHealth        float64 `json:"networkHealth"`
+			PartitionProbability float64 `json:"partitionProbability"`
+			ConsensusState       string  `json:"consensusState"`
+			LeadingVoteCount     int     `json:"leadingVoteCount"`
+		}{
+			ConsistencyLevel:     levelStr,
+			NetworkHealth:        networkHealth,
+			PartitionProbability: float64(partitionProb),
+			ConsensusState:       fmt.Sprintf("%v", consensusStatus["state"]),
+			LeadingVoteCount:     5, // Mock data for leading vote count
+		}
+
+		// Return JSON response
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	})
+
+	// Add network endpoint
+	http.HandleFunc("/api/network", func(w http.ResponseWriter, r *http.Request) {
+		// Get conflict data
+		conflictSummary := cr.GetConflictSummary()
+
+		// Get shard data
+		shardCount := forest.GetShardCount()
+		shardDepthMap := forest.GetShardHierarchyDepth()
+
+		// Calculate network stats
+		activeConflicts := conflictSummary["activeConflicts"].(int)
+		resolvedConflicts := conflictSummary["resolvedConflicts"].(int)
+
+		// Calculate average entropy from blocks (as a measure of network entropy)
+		totalEntropy := 0.0
+		blockCount := 0
+		iterator := bc.Iterator()
+		for {
+			block := iterator.Next()
+			if block == nil {
+				break
+			}
+			totalEntropy += block.EntropyFactor
+			blockCount++
+		}
+
+		avgEntropy := 0.0
+		if blockCount > 0 {
+			avgEntropy = totalEntropy / float64(blockCount)
+		}
+
+		// Create response
+		response := struct {
+			ShardCount        int            `json:"shardCount"`
+			ShardDepths       map[string]int `json:"shardDepths"`
+			ActiveConflicts   int            `json:"activeConflicts"`
+			ResolvedConflicts int            `json:"resolvedConflicts"`
+			AverageEntropy    float64        `json:"averageEntropy"`
+		}{
+			ShardCount:        shardCount,
+			ShardDepths:       shardDepthMap,
+			ActiveConflicts:   activeConflicts,
+			ResolvedConflicts: resolvedConflicts,
+			AverageEntropy:    avgEntropy,
+		}
+
+		// Return JSON response
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	})
+
+	// Add blocks endpoint to list all blocks
+	http.HandleFunc("/api/blocks", func(w http.ResponseWriter, r *http.Request) {
+		blocks := make([]map[string]interface{}, 0)
+		iterator := bc.Iterator()
+
+		for {
+			block := iterator.Next()
+			if block == nil {
+				break
+			}
+
+			blockData := map[string]interface{}{
+				"height":           block.Height,
+				"hash":             fmt.Sprintf("%x", block.Hash),
+				"prevHash":         fmt.Sprintf("%x", block.PrevBlockHash),
+				"timestamp":        block.Timestamp,
+				"transactionCount": len(block.Transactions),
+				"entropy":          block.EntropyFactor,
+				"merkleRoot":       fmt.Sprintf("%x", block.MerkleRoot),
+				"nonce":            block.Nonce,
+			}
+
+			blocks = append(blocks, blockData)
+		}
+
+		// Sort blocks by height (descending)
+		sort.Slice(blocks, func(i, j int) bool {
+			return blocks[i]["height"].(int64) > blocks[j]["height"].(int64)
+		})
+
+		response := map[string]interface{}{
+			"blocks": blocks,
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	})
+
+	// Add endpoint to get block details by hash
+	http.HandleFunc("/api/blocks/", func(w http.ResponseWriter, r *http.Request) {
+		path := strings.TrimPrefix(r.URL.Path, "/api/blocks/")
+		if path == "" {
+			http.NotFound(w, r)
+			return
+		}
+
+		// Convert hash string to byte array
+		blockHash, err := hex.DecodeString(path)
+		if err != nil {
+			http.Error(w, "Invalid block hash format", http.StatusBadRequest)
+			return
+		}
+
+		// Find the block
+		var blockData map[string]interface{}
+		iterator := bc.Iterator()
+
+		for {
+			block := iterator.Next()
+			if block == nil {
+				break
+			}
+
+			if bytes.Equal(block.Hash, blockHash) {
+				// Convert transactions to readable format
+				txs := make([]map[string]interface{}, len(block.Transactions))
+				for i, tx := range block.Transactions {
+					txData := base64.StdEncoding.EncodeToString(tx.Data)
+					txs[i] = map[string]interface{}{
+						"id":        fmt.Sprintf("%x", tx.ID),
+						"timestamp": tx.Timestamp,
+						"data":      txData,
+						"type":      "Standard",
+					}
+				}
+
+				blockData = map[string]interface{}{
+					"height":       block.Height,
+					"hash":         fmt.Sprintf("%x", block.Hash),
+					"prevHash":     fmt.Sprintf("%x", block.PrevBlockHash),
+					"merkleRoot":   fmt.Sprintf("%x", block.MerkleRoot),
+					"timestamp":    block.Timestamp,
+					"nonce":        block.Nonce,
+					"entropy":      block.EntropyFactor,
+					"transactions": txs,
+					"shardId":      "Main",
+				}
+
+				break
+			}
+		}
+
+		if blockData == nil {
+			http.NotFound(w, r)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(blockData)
+	})
+
+	// Add transactions endpoint
+	http.HandleFunc("/api/transactions", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" {
+			// Parse request body
+			var requestData struct {
+				Data string `json:"data"`
+			}
+
+			if err := json.NewDecoder(r.Body).Decode(&requestData); err != nil {
+				http.Error(w, "Invalid request data", http.StatusBadRequest)
+				return
+			}
+
+			// Create and add transaction
+			tx := core.NewTransaction([]byte(requestData.Data))
+			bc.AddTransaction(tx)
+
+			response := map[string]interface{}{
+				"success": true,
+				"txId":    fmt.Sprintf("%x", tx.ID),
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		// If not POST, return all pending transactions
+		pendingTxs := bc.GetPendingTransactions()
+		txs := make([]map[string]interface{}, len(pendingTxs))
+
+		for i, tx := range pendingTxs {
+			txData := base64.StdEncoding.EncodeToString(tx.Data)
+			txs[i] = map[string]interface{}{
+				"id":        fmt.Sprintf("%x", tx.ID),
+				"timestamp": tx.Timestamp,
+				"data":      txData,
+			}
+		}
+
+		response := map[string]interface{}{
+			"transactions": txs,
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	})
+
+	// Apply CORS middleware
+	handler := corsMiddleware(http.DefaultServeMux)
+
+	// Start the server
+	log.Println("Starting API server on :8080")
+	go func() {
+		if err := http.ListenAndServe(":8080", handler); err != nil {
+			log.Printf("API server error: %v", err)
+		}
+	}()
 }

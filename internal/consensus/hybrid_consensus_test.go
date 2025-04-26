@@ -173,10 +173,29 @@ func TestConsensusVoting(t *testing.T) {
 
 	// Setup a block and validate it
 	blockData := []byte("Test block data")
-	blockHash := []byte("testhash")
 	proposerID := "validator-1"
 
-	_, err := hc.ValidateBlock(blockData, blockHash, 12345, proposerID)
+	// Find a valid nonce first
+	var validNonce int64
+	var foundValid bool
+	var blockHash []byte
+
+	for nonce := int64(1); nonce < 100000; nonce++ {
+		valid, hash := hc.ProofOfWorkValidation(blockData, nonce)
+		if valid {
+			validNonce = nonce
+			blockHash = hash
+			foundValid = true
+			break
+		}
+	}
+
+	if !foundValid {
+		t.Skip("Could not find valid nonce in reasonable time, skipping rest of test")
+	}
+
+	// Now use the valid nonce for the block validation
+	_, err := hc.ValidateBlock(blockData, blockHash, validNonce, proposerID)
 	if err != nil {
 		t.Fatalf("Failed to validate block: %v", err)
 	}

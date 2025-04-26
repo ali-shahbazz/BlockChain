@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/binary"
 	"errors"
 	"math"
 	"math/big"
@@ -489,17 +488,39 @@ func (bft *ByzantineFaultTolerance) ValidateConsensus(votes []*ConsensusVote, bl
 
 // GenerateVRFProof creates a Verifiable Random Function proof
 func (bft *ByzantineFaultTolerance) GenerateVRFProof(nodeID string, data []byte) ([]byte, error) {
-	// In a real implementation, this would use proper VRF cryptography
+	bft.mutex.Lock()
+	defer bft.mutex.Unlock()
 
-	// Create a deterministic but unpredictable value
+	// In a real implementation, this would use proper VRF cryptography
+	// For our testing purposes, we'll create a deterministic hash
+
+	// Create a deterministic hash based on nodeID and data
 	h := sha256.New()
 	h.Write([]byte(nodeID))
 	h.Write(data)
-	timeBytes := make([]byte, 8)
-	binary.LittleEndian.PutUint64(timeBytes, uint64(time.Now().UnixNano()))
-	h.Write(timeBytes)
 
-	return h.Sum(nil), nil
+	// Generate the proof
+	proof := h.Sum(nil)
+
+	// Cache the proof for future verification
+	h2 := sha256.New()
+	h2.Write([]byte(nodeID))
+	h2.Write(data)
+	cacheKey := string(h2.Sum(nil))
+
+	bft.proofCache[cacheKey] = proofCacheEntry{
+		proof:     proof,
+		timestamp: time.Now(),
+	}
+
+	// Record this proof generation in node behavior
+	if node, exists := bft.nodes[nodeID]; exists {
+		// Update node's last signature
+		node.LastSignature = proof
+		bft.nodes[nodeID] = node
+	}
+
+	return proof, nil
 }
 
 // VerifyVRFProof implements VRF proof verification with enhanced security
@@ -520,39 +541,18 @@ func (bft *ByzantineFaultTolerance) VerifyVRFProof(nodeID string, data []byte, p
 		}
 	}
 
-	// For a proper implementation, we would use crypto library's VRF verification
-	// For this simplified version, we'll reconstruct a proof similar to how it was generated
-	// and compare it with the provided proof
-
-	// First, we'll create a hash with the same inputs as GenerateVRFProof
-	// but excluding the time component which we don't know
+	// For this implementation, we'll regenerate the proof and compare directly
+	// This simulates a proper VRF verification
 	h2 := sha256.New()
 	h2.Write([]byte(nodeID))
 	h2.Write(data)
-	baseHash := h2.Sum(nil)
+	expectedProof := h2.Sum(nil)
 
-	// Since our GenerateVRFProof includes a timestamp which we can't know exactly,
-	// we'll verify the proof by checking if it's derived from the same inputs
-	// This is done by comparing the first several bytes (which should match regardless of timestamp)
-	// and checking if the overall hash structure is valid
+	// Compare the provided proof with our expected proof
+	isValidProof := bytes.Equal(expectedProof, proof)
 
-	// Minimum required matching bytes to consider a valid proof
-	const minMatchBytes = 4
-	matchCount := 0
-
-	// Count matching bytes in the prefix
-	for i := 0; i < minMatchBytes && i < len(baseHash) && i < len(proof); i++ {
-		if baseHash[i] == proof[i] {
-			matchCount++
-		}
-	}
-
-	// Check if proof has a valid SHA-256 structure (32 bytes length)
-	isValidHashLength := len(proof) == 32
-
-	// Successfully verified if enough prefix bytes match and it has valid hash length
-	if matchCount >= minMatchBytes && isValidHashLength {
-		// Cache this proof for future verifications
+	// Cache this proof for future verifications if valid
+	if isValidProof {
 		bft.proofCache[cacheKey] = proofCacheEntry{
 			proof:     proof,
 			timestamp: time.Now(),
@@ -563,12 +563,24 @@ func (bft *ByzantineFaultTolerance) VerifyVRFProof(nodeID string, data []byte, p
 			bft.monitor.RecordVRFVerification(nodeID, true)
 		}
 
+		// Clean up old cache entries occasionally
+		if len(bft.proofCache) > 100 {
+			bft.cleanupProofCache()
+		}
+
 		return true
 	}
 
 	// If verification failed and we have a monitor, record the failure
 	if bft.monitor != nil {
 		bft.monitor.RecordVRFVerification(nodeID, false)
+	}
+
+	// Record node behavior for failed verification
+	if node, exists := bft.nodes[nodeID]; exists {
+		node.LastMisbehavior = time.Now()
+		node.ReputationScore = math.Max(0.0, node.ReputationScore-0.05)
+		bft.updateNodeTrustScore(node)
 	}
 
 	return false

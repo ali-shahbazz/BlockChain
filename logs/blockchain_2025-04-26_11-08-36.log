@@ -1,0 +1,17 @@
+[BLOCKCHAIN] 2025/04/26 11:08:36.656394 main.go:44: Logging initialized. Log file: logs\blockchain_2025-04-26_11-08-36.log
+[BLOCKCHAIN] 2025/04/26 11:08:36.705837 main.go:309: Starting consensus voting process for block 0000dbae3ead1c3b3aad90fb39bb0218b2367ed84829468960e20529ec7842e0 with proposer validator-2
+[BLOCKCHAIN] 2025/04/26 11:08:36.707430 main.go:342: Submitting vote from validator validator-1
+[BLOCKCHAIN] 2025/04/26 11:08:36.707430 main.go:347: Vote from validator-1 accepted
+[BLOCKCHAIN] 2025/04/26 11:08:36.707430 hybrid_consensus.go:340: Current consensus progress: 100.00% (threshold: 67.00%)
+[BLOCKCHAIN] 2025/04/26 11:08:36.710427 hybrid_consensus.go:347: Consensus reached for block 0000dbae3ead1c3b3aad90fb39bb0218b2367ed84829468960e20529ec7842e0 with 100.00% votes
+[BLOCKCHAIN] 2025/04/26 11:08:36.758396 main.go:318: Skipping vote from proposer validator-2 (already implied)
+[BLOCKCHAIN] 2025/04/26 11:08:36.758586 main.go:342: Submitting vote from validator validator-3
+[BLOCKCHAIN] 2025/04/26 11:08:36.759271 main.go:345: Vote from validator-3 failed: consensus protocol not in voting state
+[BLOCKCHAIN] 2025/04/26 11:08:36.810182 main.go:342: Submitting vote from validator validator-4
+[BLOCKCHAIN] 2025/04/26 11:08:36.810319 main.go:345: Vote from validator-4 failed: consensus protocol not in voting state
+[BLOCKCHAIN] 2025/04/26 11:08:36.861455 main.go:342: Submitting vote from validator validator-5
+[BLOCKCHAIN] 2025/04/26 11:08:36.861697 main.go:345: Vote from validator-5 failed: consensus protocol not in voting state
+[BLOCKCHAIN] 2025/04/26 11:08:36.912746 main.go:360: Finalizing block 0000dbae3ead1c3b3aad90fb39bb0218b2367ed84829468960e20529ec7842e0
+[BLOCKCHAIN] 2025/04/26 11:08:36.914206 blockchain.go:123: Mining block with 1 transactions
+[BLOCKCHAIN] 2025/04/26 11:08:37.079340 blockchain.go:136: Block mined with nonce 8269: 00006189eabb29850c404a0e3b44189ba8c4932a38fb2986b745b906a773c6a8
+[BLOCKCHAIN] 2025/04/26 11:08:37.081192 main.go:290: Successfully added block 1 with hash 00006189eabb29850c404a0e3b44189ba8c4932a38fb2986b745b906a773c6a8

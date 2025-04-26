@@ -1,0 +1,18 @@
+[BLOCKCHAIN] 2025/04/26 12:54:55.755685 main.go:51: Logging initialized. Log file: logs\blockchain_2025-04-26_12-54-55.log
+[BLOCKCHAIN] 2025/04/26 12:54:55.820194 main.go:321: Starting consensus voting process for block 0000de346d8762bee61c88c3796125821cd0ecc4213ef613c89786e69a75ca41 with proposer validator-2
+[BLOCKCHAIN] 2025/04/26 12:54:55.820194 main.go:354: Submitting vote from validator validator-1
+[BLOCKCHAIN] 2025/04/26 12:54:55.821203 main.go:359: Vote from validator-1 accepted
+[BLOCKCHAIN] 2025/04/26 12:54:55.821203 hybrid_consensus.go:340: Current consensus progress: 100.00% (threshold: 67.00%)
+[BLOCKCHAIN] 2025/04/26 12:54:55.825466 hybrid_consensus.go:347: Consensus reached for block 0000de346d8762bee61c88c3796125821cd0ecc4213ef613c89786e69a75ca41 with 100.00% votes
+[BLOCKCHAIN] 2025/04/26 12:54:55.872491 main.go:330: Skipping vote from proposer validator-2 (already implied)
+[BLOCKCHAIN] 2025/04/26 12:54:55.872610 main.go:354: Submitting vote from validator validator-3
+[BLOCKCHAIN] 2025/04/26 12:54:55.873272 main.go:357: Vote from validator-3 failed: consensus protocol not in voting state
+[BLOCKCHAIN] 2025/04/26 12:54:55.924069 main.go:354: Submitting vote from validator validator-4
+[BLOCKCHAIN] 2025/04/26 12:54:55.924069 main.go:357: Vote from validator-4 failed: consensus protocol not in voting state
+[BLOCKCHAIN] 2025/04/26 12:54:55.975545 main.go:354: Submitting vote from validator validator-5
+[BLOCKCHAIN] 2025/04/26 12:54:55.977610 main.go:357: Vote from validator-5 failed: consensus protocol not in voting state
+[BLOCKCHAIN] 2025/04/26 12:54:56.028588 main.go:372: Finalizing block 0000de346d8762bee61c88c3796125821cd0ecc4213ef613c89786e69a75ca41
+[BLOCKCHAIN] 2025/04/26 12:54:56.029501 blockchain.go:127: Mining block with 1 transactions
+[BLOCKCHAIN] 2025/04/26 12:54:56.064036 blockchain.go:140: Block mined with nonce 4068: 00003dc61f387a0cfbc603dc4b18c3d8e0797e54094c10fe7aa1087e1623d706
+[BLOCKCHAIN] 2025/04/26 12:54:56.065894 main.go:302: Successfully added block 7 with hash 00003dc61f387a0cfbc603dc4b18c3d8e0797e54094c10fe7aa1087e1623d706
+[BLOCKCHAIN] 2025/04/26 12:54:57.078795 main.go:898: Starting API server on :8080

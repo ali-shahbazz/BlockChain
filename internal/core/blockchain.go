@@ -11,14 +11,17 @@ import (
 
 // Blockchain represents the main blockchain structure
 type Blockchain struct {
-	mutex       sync.RWMutex
-	persistence *BlockchainPersistence
-	tip         []byte // hash of the latest block
+	mutex               sync.RWMutex
+	persistence         *BlockchainPersistence
+	tip                 []byte         // hash of the latest block
+	pendingTransactions []*Transaction // Store pending transactions
 }
 
 // NewBlockchain creates a new blockchain with a genesis block
 func NewBlockchain() *Blockchain {
-	return NewBlockchainWithPath("./data/blockchain")
+	bc := NewBlockchainWithPath("./data/blockchain")
+	bc.pendingTransactions = make([]*Transaction, 0)
+	return bc
 }
 
 // NewBlockchainWithPath creates a new blockchain with a custom data directory
@@ -74,8 +77,9 @@ func newInMemoryBlockchain() *Blockchain {
 	memPersistence.heightCache[genesis.Height] = genesis
 
 	return &Blockchain{
-		persistence: memPersistence,
-		tip:         genesis.Hash,
+		persistence:         memPersistence,
+		tip:                 genesis.Hash,
+		pendingTransactions: make([]*Transaction, 0),
 	}
 }
 
@@ -284,4 +288,34 @@ func (bc *Blockchain) GetRecentBlocks(count int) ([]*Block, error) {
 	}
 
 	return bc.persistence.GetBlocksBetweenHeights(startHeight, height)
+}
+
+// AddTransaction adds a transaction to the pending transactions pool
+func (bc *Blockchain) AddTransaction(tx *Transaction) {
+	bc.mutex.Lock()
+	defer bc.mutex.Unlock()
+
+	// Initialize the pendingTransactions slice if it's nil
+	if bc.pendingTransactions == nil {
+		bc.pendingTransactions = make([]*Transaction, 0)
+	}
+
+	bc.pendingTransactions = append(bc.pendingTransactions, tx)
+}
+
+// GetPendingTransactions returns all pending transactions
+func (bc *Blockchain) GetPendingTransactions() []*Transaction {
+	bc.mutex.RLock()
+	defer bc.mutex.RUnlock()
+
+	// Initialize the pendingTransactions slice if it's nil
+	if bc.pendingTransactions == nil {
+		bc.pendingTransactions = make([]*Transaction, 0)
+	}
+
+	// Return a copy of the pending transactions to avoid concurrent modification
+	result := make([]*Transaction, len(bc.pendingTransactions))
+	copy(result, bc.pendingTransactions)
+
+	return result
 }
