@@ -47,6 +47,7 @@ This repository contains an advanced blockchain implementation with several cutt
   /core           - Core blockchain components
 /pkg
   /crypto         - Cryptographic utilities and Merkle tree implementations
+/ui               - Web-based blockchain explorer interface
 ```
 
 ## Getting Started
@@ -57,6 +58,28 @@ To build and run the blockchain:
 go build -o blockchain cmd/blockchain/main.go
 ./blockchain
 ```
+
+To run the blockchain explorer UI:
+
+```
+cd ui/public
+# Serve with any static file server, for example:
+python -m http.server 8000
+# Then open http://localhost:8000 in your browser
+```
+
+## Blockchain Explorer UI
+
+The project includes a web-based blockchain explorer that provides:
+
+- Dashboard with blockchain statistics and charts
+- Block explorer with detailed view of all blocks
+- Transaction submission interface
+- Consensus state monitoring
+- Network health visualization
+- Real-time updates of blockchain state
+
+The UI communicates with the blockchain API running at `http://localhost:8080/api`.
 
 ## Implementation Details
 
